@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LUNA - Multi-Language AI</title>
+    <title>LUNA AI - Screen Reader & Assistant</title>
     <style>
         :root { --glow: #00f2fe; --dark: #0d1117; --accent: #4facfe; }
-        body { background: #000; font-family: 'Segoe UI', Arial, sans-serif; margin: 0; overflow: hidden; }
+        body { background: #000; font-family: 'Segoe UI', Tahoma, sans-serif; margin: 0; overflow: hidden; }
 
         /* Floating Icon */
         #luna-trigger {
@@ -16,33 +16,28 @@
             font-size: 30px; cursor: pointer; box-shadow: 0 0 25px rgba(0, 242, 254, 0.6);
             z-index: 9999; transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
-        #luna-trigger:hover { transform: scale(1.1); }
 
         /* Chat Window */
         .ai-window {
             position: fixed; bottom: 100px; right: 25px; width: 360px; height: 550px;
             background: #161b22; border-radius: 24px; display: none; flex-direction: column;
             border: 1px solid #30363d; box-shadow: 0 15px 50px rgba(0,0,0,0.9); z-index: 9998;
-            animation: slideUp 0.4s ease-out;
         }
 
         .header { padding: 18px; background: #21262d; border-bottom: 1px solid #30363d; 
-                  display: flex; justify-content: space-between; border-radius: 24px 24px 0 0; color: white; font-weight: bold; }
+                  display: flex; justify-content: space-between; border-radius: 24px 24px 0 0; color: white; }
 
         .chat-body { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
         
-        .bubble { padding: 12px 16px; border-radius: 18px; max-width: 85%; font-size: 0.95rem; line-height: 1.5; color: white; word-wrap: break-word; }
+        .bubble { padding: 12px 16px; border-radius: 18px; max-width: 85%; font-size: 0.95rem; line-height: 1.5; color: white; }
         .bot { background: #30363d; align-self: flex-start; border-bottom-left-radius: 4px; }
         .user { background: #1f6feb; align-self: flex-end; border-bottom-right-radius: 4px; }
 
         .input-box { padding: 15px; display: flex; gap: 8px; background: #0d1117; border-radius: 0 0 24px 24px; }
         input { flex: 1; padding: 12px; border-radius: 12px; border: 1px solid #30363d; background: #161b22; color: white; outline: none; }
-        button { background: #238636; border: none; border-radius: 12px; padding: 0 18px; color: white; cursor: pointer; transition: 0.2s; }
-        button:hover { background: #2ea043; }
-
-        img { width: 100%; border-radius: 12px; margin-top: 10px; border: 1px solid var(--glow); }
-
-        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        .btn { background: #238636; border: none; border-radius: 12px; padding: 10px; color: white; cursor: pointer; font-size: 1.2rem; }
+        
+        #screen-canvas { display: none; }
     </style>
 </head>
 <body>
@@ -51,19 +46,23 @@
 
     <div id="ai-window" class="ai-window">
         <div class="header">
-            <span>LUNA Multi-Language ✨</span>
+            <span>LUNA: Screen Expert ✨</span>
             <span style="cursor:pointer" onclick="toggleLuna()">✕</span>
         </div>
         <div id="chat-stream" class="chat-body">
-            <div class="bubble bot">Hello! I am LUNA. I speak many languages. Try asking me in Arabic, French, or English! <br><br>مرحباً! أنا لونا، أتحدث لغات عديدة. جربي التحدث معي بالعربية!</div>
+            <div class="bubble bot">Welcome! I'm LUNA. Click 📷 to let me see your screen and explain it, or just talk to me!</div>
         </div>
         <div class="input-box">
-            <input type="text" id="user-in" placeholder="Type a message...">
-            <button onclick="askLUNA()">🚀</button>
+            <button class="btn" onclick="captureScreen()" title="Share Screen">📷</button>
+            <input type="text" id="user-in" placeholder="Ask me anything...">
+            <button class="btn" onclick="askLUNA()">🚀</button>
         </div>
     </div>
 
+    <canvas id="screen-canvas"></canvas>
+
     <script>
+        // وضعت المفتاح الخاص بكِ هنا مباشرة كما طلبتِ
         const KEY = "AIzaSyA2glGeNRIzxJPM3rN8DRRrYDC8NZD53fg";
 
         function toggleLuna() {
@@ -71,41 +70,75 @@
             win.style.display = (win.style.display === 'none' || win.style.display === '') ? 'flex' : 'none';
         }
 
-        async function askLUNA() {
+        async function askLUNA(imageData = null) {
             const input = document.getElementById('user-in');
-            const text = input.value.trim();
-            if(!text) return;
+            const text = input.value.trim() || (imageData ? "Please explain what is in this screen" : "");
+            if(!text && !imageData) return;
 
-            addBubble(text, 'user');
+            addBubble(text || "Analyzing screen...", 'user');
             input.value = "";
-
-            // Check for Image Generation Command
-            if (text.toLowerCase().includes("draw") || text.includes("ارسم") || text.includes("image")) {
-                const loader = addBubble("Painting your imagination...", 'bot');
-                const imgUrl = `https://pollinations.ai/p/${encodeURIComponent(text)}?width=1024&height=1024&nologo=true`;
-                loader.innerHTML = "Done! Here is your creation: <br><img src='"+imgUrl+"'>";
-                speak("Drawing completed.", "en-US");
-                return;
-            }
-
-            const loading = addBubble("...", 'bot');
+            const loading = addBubble("Thinking...", 'bot');
 
             try {
+                let bodyData;
+                if (imageData) {
+                    // إذا كان هناك صورة للشاشة، نرسلها للذكاء الاصطناعي
+                    bodyData = {
+                        contents: [{
+                            parts: [
+                                { text: text },
+                                { inline_data: { mime_type: "image/png", data: imageData } }
+                            ]
+                        }]
+                    };
+                } else {
+                    bodyData = { contents: [{ parts: [{ text: text }] }] };
+                }
+
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${KEY}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: text }] }] })
+                    body: JSON.stringify(bodyData)
                 });
                 
                 const data = await res.json();
                 const reply = data.candidates[0].content.parts[0].text;
                 loading.innerText = reply;
-                
-                // Smart Voice: Detect language and speak
                 autoSpeak(reply);
 
             } catch (e) {
-                loading.innerText = "Connection error. Please check your internet or API Key.";
+                loading.innerText = "Error! Check your Internet or API Key.";
+            }
+        }
+
+        // خاصية قراءة الشاشة (Screen Capture)
+        async function captureScreen() {
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.play();
+
+                video.onloadedmetadata = () => {
+                    setTimeout(() => {
+                        const canvas = document.getElementById('screen-canvas');
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0);
+                        
+                        // تحويل الصورة لنظام Base64 لإرسالها
+                        const imageData = canvas.toDataURL('image/png').split(',')[1];
+                        
+                        // إغلاق الكاميرا/الشاشة بعد اللقطة
+                        stream.getTracks().forEach(track => track.stop());
+                        
+                        // إرسال الصورة لـ LUNA
+                        askLUNA(imageData);
+                    }, 500);
+                };
+            } catch (err) {
+                alert("Please allow screen sharing so I can see what you see!");
             }
         }
 
@@ -122,14 +155,7 @@
         function autoSpeak(text) {
             window.speechSynthesis.cancel();
             const utter = new SpeechSynthesisUtterance(text.replace(/[*#`]/g, ''));
-            
-            // Auto detect language
-            if (/[أ-ي]/.test(text)) {
-                utter.lang = 'ar-SA';
-            } else if (/[a-zA-Z]/.test(text)) {
-                utter.lang = 'en-US';
-            }
-            
+            utter.lang = /[أ-ي]/.test(text) ? 'ar-SA' : 'en-US';
             window.speechSynthesis.speak(utter);
         }
     </script>
